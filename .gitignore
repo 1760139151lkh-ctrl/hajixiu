@@ -1,0 +1,25 @@
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+test-results/
+playwright-report/
+# Workstation-only material: never committed.
+private/
+workstation/
+*.safetensors
+*.ckpt
+.env
+
+# Local run artifacts.
+relay/*/out/
+relay/*/REPORT.md
+
+# Local secrets (OpenAI key etc.): never committed.
+.env.local
+.env.*.local
+
+# WeChat compiler output (regenerate with npm run build:wechat).
+miniprogram/

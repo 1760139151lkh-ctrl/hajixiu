@@ -1,0 +1,182 @@
+"""The words the studio's model is given, kept in one place so they can be tuned without touching the plumbing.
+
+Every brief asks for the same three milestones, so the app can show progress honestly:
+  PLAN {json}    as soon as the model knows what it will do
+  (the pictures, saved to out/1.png, out/2.png, ...)
+  DONE {json}    a short reply in the room's voice and three ideas for what to try next
+  FAILED {json}  instead, when it cannot
+"""
+
+from __future__ import annotations
+
+from .turns import Inputs, Turn
+
+ROLE = {
+    "style": "a style reference: borrow its palette, light and texture, not its content",
+    "backdrop": "a place: use it as the new background",
+    "with": "another picture to work with",
+    "look": ("a reference for the look: take from it what the words name (a cut, a fringe, a colour, make-up, clothes) and "
+             "put it on the subject; never its face, its person or its background"),
+    "marks": ("the subject picture with the person's own rough marks drawn on it (circled, crossed out, sketched lines): they "
+              "show where and how to change it. Follow them, and never draw the marks into the result"),
+}
+OPS = {
+    "create": "Paint a new picture from the words.",
+    "edit": "Change the subject picture as the words say. Keep everything the words do not mention: the same people, faces, poses and composition.",
+    "restyle": "Create a portrait of the sitter in the world and medium described below. Let that setting guide the clothing, pose, expression and light.",
+    "reference": "Change the subject picture so it takes on the style reference's palette, light and texture. Keep the subject's composition and content.",
+    "blend": "Combine the pictures into one, as the words say.",
+    "region": "Change only the marked regions of the subject picture, each as its note says. Leave everything outside the masks exactly as it is."
+              " Inside a mask, change only what its note asks for: anything else there (a crown, clips, a hat, glasses, jewellery) stays as it was.",
+    "backdrop": "Replace the background behind the subject with the place described below. Keep the subject exactly, and match the light to the new place.",
+    "remove": "Remove what the words (or the marked regions) point at, and fill the space so nobody could tell.",
+    "vary": "Make variations of the subject picture: the same subject, different takes on it.",
+    "angles": ("Show the person in the subject picture from other angles, one picture each, in this order unless the words say otherwise: "
+               "three-quarter view with the nose pointing toward the right edge, full profile toward that same edge, "
+               "then three-quarter view with the nose pointing toward the left edge. Keep the atmosphere of the sitting. Only the camera moves."),
+}
+PIN_MARKS = "①②③④⑤⑥⑦⑧⑨"
+# what a change is called, for the studio's reply (zh-SG)
+OP_WORDS = {"create": "a new picture", "edit": "an edit they asked for in words", "restyle": "the whole photo turned into an art style",
+            "reference": "an edit borrowing a reference's look", "blend": "pictures combined", "region": "only some parts of the face or hair changed",
+            "backdrop": "a new background", "remove": "something removed", "vary": "three more takes of the same picture", "angles": "the same look from other angles"}
+# next things to try when the words model is not there (or too slow): short zh-SG instructions
+IDEAS = {
+    "restyle": ["背景换成夜景霓虹", "加点闪闪发光", "换成灿烂笑容"], "edit": ["再自然一点", "背景换成海边日落", "加点闪闪发光"],
+    "region": ["颜色再浅一点", "换个发型试试", "加个小皇冠"], "vary": ["换个角度看看", "背景换成星空", "加点烟花"],
+    "angles": ["换回正脸", "背景换成樱花", "整体再梦幻一点"], "backdrop": ["换成黄昏光线", "换个地方", "改成夜景"],
+    "create": ["光线暖一点", "改成夜景", "多来几张"], "reference": ["更像参考图", "颜色保留多一点", "多来几张"],
+    "blend": ["第一张多一点", "第二张多一点", "换个背景"], "remove": ["再清干净一点", "换个背景", "光线暖一点"],
+}
+
+
+def direct_brief(turn: Turn, inputs: Inputs) -> str:
+    """The prompt for an image model asked directly (the openai engine): what to do, which picture is which, the words."""
+    op = turn.intent.op if inputs.pictures else "create"
+    lines = [OPS.get(op, OPS["edit"])]
+    if len(inputs.pictures) > 1:
+        order = [inputs.subject or next(iter(inputs.pictures))] + [h for h in inputs.pictures if h != inputs.subject]
+        roles = dict(inputs.refs)
+        lines.append("The images are, in order: " + "; ".join(
+            f"@{h}, " + ("the subject" if i == 0 else ROLE.get(roles.get(h, "with"), ROLE["with"])) for i, h in enumerate(order)) + ".")
+    if turn.text.strip():
+        lines.append(turn.text.strip())
+    for n, note, _mask in inputs.pins:
+        lines.append(f"In the marked region {PIN_MARKS[n - 1]}: {note or 'change this'}.")
+    if turn.look:
+        lines.append(f"The look «{turn.look.name}»: {turn.look.prompt}")
+    if turn.backdrop:
+        lines.append(f"The new place: {turn.backdrop.words}")
+    if turn.taste.strip():
+        lines.append(f"Always (unless said otherwise): {turn.taste.strip()}")
+    return " ".join(line for line in lines if line)[:3900]
+
+
+def reply_brief(turn: Turn) -> str:
+    """The words model's brief for the studio's answer: one short line in the app's voice and three things to try next."""
+    op = turn.intent.op
+    said = (turn.say or turn.text).strip()[:600]
+    style = turn.room.name if turn.room and turn.room.name else (turn.preset or "")
+    return "\n".join([
+        "You are the voice of 哈基秀 (Hajixiu), a selfie-to-art app loved by young TikTok creators in Singapore and Malaysia.",
+        f"The person just asked for this, and their picture is being made right now: «{said or OP_WORDS.get(op, 'a new picture')}».",
+        f"The kind of change: {OP_WORDS.get(op, OP_WORDS['edit'])}." + (f" Their style: «{style}»." if style else ""),
+        "Write reply: one line in Simplified Chinese (zh-SG), warm, playful and casual like a friend on TikTok (a light 'lah' or 'leh' is fine;"
+        " at most one emoji), at most 24 characters, saying it is ready. When they asked for specific changes, name them in a word or two"
+        " (like 发色和刘海都换好啦 or 滨海湾夜景安排上了). Do not describe their face or body, and do not promise details you cannot see.",
+        "Write suggestions: exactly 3 different next edits they would enjoy on this same picture, each 4 to 10 Chinese characters, written as a"
+        " direct instruction (like 背景换成海边日落 or 加一只小猫在肩上), none repeating what they just asked, all safe for every age.",
+    ])
+
+
+def angle_brief(turn: Turn, inputs: Inputs, angle: str) -> str:
+    """One of several angles, asked for on its own (the openai engine makes each angle in its own call)."""
+    lines = [f"Move the camera around the sitter to this view: {angle}.",
+             "Keep the look and atmosphere of the sitting. Let the new viewpoint show the sitter naturally."]
+    if turn.text.strip():
+        lines.append(turn.text.strip())
+    return " ".join(lines)[:3900]
+
+
+def turn_brief(turn: Turn, inputs: Inputs, files: dict[str, str], *, size: str, quality: str, image_hint: str) -> str:
+    """The brief for one turn. files maps each picture's handle (and mask names) to its path inside the job folder."""
+    lines = ["You are the studio hand of Likeness, a personal image studio. Work only inside the current folder.", ""]
+    lines += ["The person wrote:", f"«{turn.text.strip() or '(no words; see the instructions below)'}»", ""]
+    if inputs.pictures:
+        lines.append("Pictures (also attached to this message, in this order):")
+        for handle in inputs.pictures:
+            role = "the subject: the picture to change" if handle == inputs.subject else ROLE.get(dict(inputs.refs).get(handle, "with"), ROLE["with"])
+            lines.append(f"- {handle} = {files[handle]}: {role}")
+        lines.append("In the person's words, @A means picture A, and so on.")
+        lines.append("")
+    lines.append("What to do: " + OPS.get(turn.intent.op if inputs.pictures else "create", OPS["edit"]))
+    for n, note, _mask in inputs.pins:
+        mask = files.get(f"pin{n}")
+        lines.append(f"- Region {PIN_MARKS[n - 1]} ({mask}; white = change, black = keep): {note or 'change this'}")
+    if files.get("edit"):
+        lines.append(f"- The same regions as one edit mask, in the convention image-edit tools expect (transparent = change): {files['edit']}")
+        if turn.intent.op == "region":
+            lines.append("Keep the source crop, scale and alignment so the edited areas line up. The studio composites them onto the original. Do not resize or composite the tool's output yourself.")
+    if inputs.subject_mask is not None:
+        lines.append(f"- The subject to keep is marked in {files['subject']} (white = keep in front).")
+    if turn.look:
+        lines.append(f"Look: «{turn.look.name}»: {turn.look.prompt}")
+    if turn.backdrop:
+        lines.append(f"New place: «{turn.backdrop.name}»: {turn.backdrop.words}")
+    if turn.taste.strip():
+        lines.append(f"Their standing taste (follow it unless the words above say otherwise): «{turn.taste.strip()}»")
+    if turn.room and turn.room.name:
+        lines.append(f"(For taste only: the person is working in a room called «{turn.room.name}», {turn.room.line})")
+    lines += ["", f"Make {turn.n} picture{'s' if turn.n > 1 else ''}, {size}, quality {quality}.", "",
+              "How to work:",
+              '1. First reply with one line: PLAN {"summary": "<one short sentence: what you will do>", "prompt": "<the image prompt you will use>"}',
+              f"2. Make the picture{'s' if turn.n > 1 else ''}. {image_hint}",
+              "3. If the image tool saves the PNG files itself, leave them where it saves them. The studio collects those files in generation order. "
+              "Otherwise write only these PNGs: " + ", ".join(f"out/{i + 1}.png" for i in range(turn.n)) + ".",
+              f'4. Last, reply with one line: DONE {{"reply": "<one or two warm sentences to the person, in this voice: {", ".join(turn.room.voice[:3]) if turn.room and turn.room.voice else "warm, brief, precise"}>", "suggestions": ["<three short things they might ask next, at most five words each>"]}}',
+              'If it cannot be done, reply with one line instead: FAILED {"message": "<why, plainly>", "hint": "<what the person could change>"}',
+              "Do not ask questions; decide. Do not change files outside out/."]
+    return "\n".join(lines)
+
+
+def room_brief(text: str, palette: list[str] | None) -> str:
+    extra = f" Use these colours from a picture as the starting point: {', '.join(palette)}." if palette else ""
+    return (f"Invent a room for the Likeness app, from this vibe: «{text}».{extra}\n"
+            "A room is the app's whole atmosphere: colours, type, ornaments, scenery, weather, the wipe used to enter it, its little sounds, how it moves, and how its studio talks.\n"
+            "Colours are #rrggbb. ground and ground2 are the background (light rooms: pale; dark rooms: deep). surface is for cards; ink must read clearly on surface; soft is for quieter text; accent and accent2 are the highlights.\n"
+            "Voice lines are short, warm and in character; placeholder is at most 24 characters; send is one short word.\n"
+            "Answer with JSON only, matching the schema.")
+
+
+def look_brief(text: str, has_picture: bool) -> str:
+    source = "the attached picture's look" if has_picture and not text else f"«{text}»" + (" (the attached picture shows the look)" if has_picture else "")
+    return (f"Describe a look (an image style) for Likeness from {source}.\n"
+            "name: two or three words. line: one evocative sentence. prompt: the style instructions an image model should follow, one line.\n"
+            "ramp: five #rrggbb colours from deepest shadow to brightest light. keep: 0 to 1, how much of a picture's own colour survives. grain, bloom, vignette: 0 to 1.\n"
+            "Answer with JSON only, matching the schema.")
+
+
+def backdrops_brief(text: str, near: float, dream: float, room: str, has_picture: bool) -> str:
+    return ("Suggest six backdrops (new places to stand in) for " + ("the attached picture" if has_picture else "a portrait") + ".\n"
+            + (f"The person asked for: «{text}». Start with that, then variations.\n" if text else "")
+            + f"Lean {'close-up and intimate (rooms, walls, windows)' if near < .4 else 'wide and far (landscapes, skylines)' if near > .6 else 'between close and far'}, "
+            + f"and {'real and photographic' if dream < .4 else 'dreamlike and impossible' if dream > .6 else 'between real and dreamt'}.\n"
+            + (f"The person is working in a room called «{room}»; let that colour the ideas a little.\n" if room else "")
+            + "Each backdrop: name (at most five words) and words (one vivid line an image model can paint).\nAnswer with JSON only, matching the schema.")
+
+
+def style_brief(text: str, has_picture: bool) -> str:
+    """A whole new style for 哈基秀, invented from a person's words or from a picture of a look they like."""
+    source = ("the attached picture's look (its medium, palette, light and mood, never its people)" if has_picture and not text
+              else f"«{text}»" + (" (the attached picture shows the look they mean)" if has_picture else ""))
+    return (f"Invent a new art-avatar style for 哈基秀, a playful app that turns a selfie into an artistic portrait, from {source}.\n"
+            "Write name, line, hook and detail labels in Simplified Chinese as young people in Singapore and Malaysia chat: short, vivid, natural. "
+            "name: 2 to 5 characters. line: one sentence, at most 22 characters. hook: at most 9 characters.\n"
+            "prompt: in English, the instruction an image model follows to repaint a person's photo in this style: medium, palette, light, texture, "
+            "mood and setting, ending with 'Still clearly them.' Never name living artists, studios, brands or existing characters.\n"
+            "colors: the app's theme for this style as #rrggbb: bg and bg2 (the background gradient), surface (cards), ink (text, readable on surface), "
+            "soft (quiet text), accent and accent2 (highlights). dark: whether the theme is dark.\n"
+            "look: a live camera filter that hints at the style, each 0 to 1 except sat and contrast (0.5 to 1.6, 1 is neutral).\n"
+            "details: exactly eight options, two in each group (acc: an accessory, light: a lighting effect, scene: a background, frame: a border), "
+            "each with a Chinese label of 2 to 5 characters and English words for the image model.\n"
+            "Answer with JSON only, matching the schema.")
