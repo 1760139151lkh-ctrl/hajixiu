@@ -1,5 +1,7 @@
 # 哈基秀 · 一张自拍，秒变艺术头像
 
+**在线网页体验（GitHub Pages）**：[https://1760139151lkh-ctrl.github.io/hajixiu/](https://1760139151lkh-ctrl.github.io/hajixiu/)
+
 ## 微信小程序
 
 解压后，用微信开发者工具导入 `miniprogram` 文件夹，选择游客模式即可在电脑上编译、浏览风格和用示例试玩。目录内已有 WXML、WXSS、脚本和离线样张。小程序复用 `web` 的界面源码、风格参数和创作流程，以及 `likeness` 的后端。

@@ -8,7 +8,7 @@ self.addEventListener('activate', e => e.waitUntil((async () => {
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
-  if (url.pathname.startsWith('/api/') || url.pathname === '/' || url.pathname.endsWith('.html') || url.pathname.endsWith('studio.json')) return;
+  if (url.pathname.includes('/api/') || url.pathname.endsWith('/') || url.pathname.endsWith('.html') || url.pathname.endsWith('studio.json')) return;
   const versioned = /^\/v[0-9a-f]{16}\//.test(url.pathname);
   const heavy = /\/(img|vendor|fonts)\//.test(url.pathname);
   if (!versioned && !heavy) return;   // unversioned code: let the browser revalidate as usual
